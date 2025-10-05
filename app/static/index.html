@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Texas Housing Growth Predictions</title>
+  <!-- Tailwind CSS from CDN for quick styling -->
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
+</head>
+<body class="bg-gray-50 p-6">
+  <h1 class="text-3xl font-bold mb-4">Texas Housing Growth Predictions</h1>
+  <p class="mb-4 text-gray-700">Select a snapshot year and forecast horizon to see which Texas cities are projected to grow the most.  Results are sorted by predicted compound annual growth rate (CAGR).</p>
+  <form id="rank-form" class="flex flex-wrap items-center space-x-2 mb-6">
+    <label for="year-input" class="mr-2 font-semibold">Snapshot Year:</label>
+    <input id="year-input" type="number" class="border rounded px-2 py-1 w-24" min="2000" max="2030" required />
+    <label for="horizon-select" class="mr-2 ml-4 font-semibold">Horizon:</label>
+    <select id="horizon-select" class="border rounded px-2 py-1">
+      <option value="5">5&nbsp;years</option>
+      <option value="10">10&nbsp;years</option>
+    </select>
+    <label for="top-input" class="mr-2 ml-4 font-semibold">Top&nbsp;N:</label>
+    <input id="top-input" type="number" class="border rounded px-2 py-1 w-20" min="1" max="200" value="50" />
+    <button type="submit" class="ml-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 focus:outline-none">Get Rankings</button>
+  </form>
+  <div id="result-container"></div>
+  <script src="script.js"></script>
+</body>
+</html>
