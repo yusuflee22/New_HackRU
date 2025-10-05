@@ -189,6 +189,10 @@ async def predict(
     feature_cols = [c for c in features_df.columns if c not in {"city_norm", "snapshot_year", target_col}]
     feature_values = row[feature_cols]
     X = feature_values.to_frame().T
+    #ADDED CODE HERE
+    X = X.apply(pd.to_numeric, errors="coerce")
+    X = X.fillna(0.0)
+
     # Predict
     pred = float(model.predict(X)[0])
     # Construct response
@@ -197,7 +201,7 @@ async def predict(
         "year": year,
         "horizon_years": h,
         "predicted_cagr": pred,
-        "used_features": {col: float(row[col]) for col in feature_cols},
+        "used_features": {col: float(X.iloc[0][col]) for col in feature_cols},
     }
     return response
 

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Texas Growth Map</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: calc(100vh - 90px); }
+    .leaflet-popup-content { min-width: 260px; }
+    .legend { background: white; padding: 8px 10px; border-radius: 6px; line-height: 1.2; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+    .legend i { width: 16px; height: 16px; float: left; margin-right: 8px; opacity: 0.8; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div class="px-4 py-3 bg-white shadow flex flex-wrap items-center gap-3">
+    <div class="text-xl font-semibold">Texas Growth Map</div>
+    <div class="flex items-center gap-2">
+      <label class="text-sm">Year</label>
+      <input id="year" type="number" class="border rounded px-2 py-1 w-24" value="2015"/>
+      <label class="text-sm">Horizon</label>
+      <select id="h" class="border rounded px-2 py-1">
+        <option value="5">5y</option>
+        <option value="10">10y</option>
+      </select>
+      <label class="text-sm">Top</label>
+      <input id="top" type="number" class="border rounded px-2 py-1 w-20" value="200"/>
+      <button id="loadBtn" class="bg-blue-600 text-white rounded px-3 py-1">Load</button>
+    </div>
+    <div class="ml-auto flex items-center gap-2">
+      <input id="search" type="text" class="border rounded px-2 py-1" placeholder="Search city..."/>
+      <button id="goBtn" class="bg-gray-700 text-white rounded px-3 py-1">Go</button>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Libraries -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Heat plugin MUST load after Leaflet -->
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/static/coords_tx.js"></script>
+
+  <!-- App -->
+  <script>
+    const apiBase = ''; // same origin as FastAPI
+
+    // Base map
+    const map = L.map('map').setView([31.0, -98.7], 6); // Texas center
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    // Layers
+    let layerGroup = L.layerGroup().addTo(map); // circles
+    let heatLayer = null; // heatmap (created per render)
+
+    // Color & size helpers
+    function colorForCAGR(x){
+      const stops = [
+        {t:0.00, c:'#4575b4'},
+        {t:0.03, c:'#91bfdb'},
+        {t:0.06, c:'#ffffbf'},
+        {t:0.09, c:'#fdae61'},
+        {t:0.12, c:'#d73027'},
+      ];
+      for (let i=stops.length-1; i>=0; i--) if (x >= stops[i].t) return stops[i].c;
+      return stops[0].c;
+    }
+    function radiusForCAGR(x){ return 6 + Math.min(24, Math.max(0, x*200)); }
+    function normalizeCity(name){ return (name || '').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
+
+    // API helpers
+    async function loadRank(year, h, top){
+      const url = `${apiBase}/rank?year=${year}&h=${h}&top=${top}`;
+      const res = await fetch(url);
+      if(!res.ok) throw new Error('Rank fetch failed');
+      return await res.json();
+    }
+    async function loadHistory(city){
+      const url = `${apiBase}/history?city=${encodeURIComponent(city)}`;
+      const res = await fetch(url);
+      if(!res.ok) return null;
+      return await res.json();
+    }
+
+    // Legend
+    function addLegend(){
+      const legend = L.control({position: 'bottomleft'});
+      legend.onAdd = function () {
+        const div = L.DomUtil.create('div', 'legend');
+        const grades = [0.00, 0.03, 0.06, 0.09, 0.12];
+        let html = '<b>Predicted CAGR</b><br/>';
+        for (let i=0; i<grades.length; i++) {
+          const c = colorForCAGR(grades[i] + 0.0001);
+          html += `<i style="background:${c}"></i> ${(grades[i]*100).toFixed(0)}%+<br/>`;
+        }
+        div.innerHTML = html;
+        return div;
+      };
+      legend.addTo(map);
+    }
+    addLegend();
+
+    // Render map for current controls
+    async function render(){
+      const year = parseInt(document.getElementById('year').value, 10);
+      const h = parseInt(document.getElementById('h').value, 10);
+      const top = parseInt(document.getElementById('top').value, 10);
+
+      // Clear previous layers
+      layerGroup.clearLayers();
+      if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
+
+      // Fetch data
+      const data = await loadRank(year, h, top);
+
+      // Build heat points (lat, lon, intensity 0..1)
+      const maxCagr = Math.max(0.12, ...data.map(r => Number(r.predicted_cagr) || 0));
+      const heatData = [];
+
+      // Draw circles and collect heat points
+      for(const row of data){
+        const key = normalizeCity(row.city);
+        if(!TX_COORDS[key]) continue;
+
+        const [lat, lon] = TX_COORDS[key];
+        const cagr = Number(row.predicted_cagr) || 0;
+
+        // intensity proportional to CAGR (0..1)
+        const intensity = Math.min(1, Math.max(0, cagr / maxCagr));
+        heatData.push([lat, lon, intensity]);
+
+        // Circles stay for interaction
+        const circle = L.circleMarker([lat, lon], {
+          radius: radiusForCAGR(cagr),
+          color: '#333',
+          weight: 1,
+          fillColor: colorForCAGR(cagr),
+          fillOpacity: 0.8
+        });
+
+        const containerId = `chart_${key.replace(/[^A-Z0-9]/g,'_')}`;
+        const popupHTML = `
+          <div class="text-sm">
+            <div class="font-semibold mb-1">${row.city}</div>
+            <div>Predicted ${h}y CAGR: <b>${(cagr*100).toFixed(1)}%</b></div>
+            <div class="text-gray-600">Snapshot year: ${year}</div>
+            <div class="mt-2"><canvas id="${containerId}" width="260" height="110"></canvas></div>
+          </div>`;
+        circle.bindPopup(popupHTML);
+
+        circle.on('popupopen', async () => {
+          const hist = await loadHistory(row.city);
+          if(!hist) return;
+          const ctx = document.getElementById(containerId);
+          if(!ctx) return;
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: hist.years,
+              datasets: [{
+                label: 'ZHVI',
+                data: hist.values,
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.2
+              }]
+            },
+            options: {
+              responsive: false,
+              plugins: { legend: { display: false } },
+              scales: { x: { display: false }, y: { display: false } }
+            }
+          });
+        });
+
+        circle.addTo(layerGroup);
+      }
+
+      // Create heat layer (on top)
+      if (heatData.length > 0) {
+        heatLayer = L.heatLayer(heatData, {
+          radius: 25,  // increase for bigger blobs
+          blur: 18,
+          maxZoom: 8
+        }).addTo(map);
+      }
+
+      // Fit to data
+      if (layerGroup.getLayers().length > 0) {
+        map.fitBounds(layerGroup.getBounds().pad(0.2));
+      }
+    }
+
+    // Controls
+    document.getElementById('loadBtn').addEventListener('click', render);
+    document.getElementById('goBtn').addEventListener('click', () => {
+      const term = normalizeCity(document.getElementById('search').value);
+      if(!term || !TX_COORDS[term]) return;
+      const [lat, lon] = TX_COORDS[term];
+      map.setView([lat, lon], 10, { animate: true });
+    });
+
+    // Initial load
+    render();
+  </script>
+</body>
+</html>
