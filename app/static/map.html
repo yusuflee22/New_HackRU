@@ -49,16 +49,14 @@
     let layerGroup = L.layerGroup().addTo(map);
 
     function colorForCAGR(x){
-      const stops = [
-        {t:0.00, c:'#4575b4'},
-        {t:0.03, c:'#91bfdb'},
-        {t:0.06, c:'#ffffbf'},
-        {t:0.09, c:'#fdae61'},
-        {t:0.12, c:'#d73027'},
-      ];
-      for (let i=stops.length-1; i>=0; i--) if (x >= stops[i].t) return stops[i].c;
-      return stops[0].c;
-    }
+      if (x < -0.05) return '#4b6cb7'; // deep blue  (< -5%)
+      if (x <  0.00) return '#88a8d8'; // light blue (-5% to 0%)
+      if (x <  0.02) return '#c7c7c7'; // grey      (0% to 2%)
+      if (x <  0.04) return '#fee08b'; // yellow    (2% to 4%)
+      if (x <  0.06) return '#fdae61'; // orange    (4% to 6%)
+      if (x <  0.08) return '#f46d43'; // orange-red(6% to 8%)
+      return '#d73027';               // red       (>= 8%)
+  }
     function radiusForCAGR(x){ return 6 + Math.min(24, Math.max(0, x*200)); }
     function normalizeCity(name){ return (name||'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
 
@@ -78,12 +76,17 @@
       const legend = L.control({position: 'bottomleft'});
       legend.onAdd = function () {
         const div = L.DomUtil.create('div', 'legend');
-        const grades = [0.00, 0.03, 0.06, 0.09, 0.12];
+        const buckets = [
+          { label: '&lt; −5%',     color: '#4b6cb7' },
+          { label: '−5% to 0%',    color: '#88a8d8' },
+          { label: '0% to 2%',     color: '#c7c7c7' },
+          { label: '2% to 4%',     color: '#fee08b' },
+          { label: '4% to 6%',     color: '#fdae61' },
+          { label: '6% to 8%',     color: '#f46d43' },
+          { label: '≥ 8%',         color: '#d73027' },
+        ];
         let html = '<b>Predicted CAGR</b><br/>';
-        for (let i=0; i<grades.length; i++) {
-          const c = colorForCAGR(grades[i] + 0.0001);
-          html += `<i style="background:${c}"></i> ${(grades[i]*100).toFixed(0)}%+<br/>`;
-        }
+        html += buckets.map(b => `<i style="background:${b.color}"></i> ${b.label}`).join('<br/>');
         div.innerHTML = html;
         return div;
       };
